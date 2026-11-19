@@ -27,6 +27,7 @@ class WindChimeApplication:
         self.file_handler = None
 
         self.shutdown_event = asyncio.Event()
+        self._shutting_down = False
 
     def initialize(self):
         """初始化应用程序。"""
@@ -50,6 +51,7 @@ class WindChimeApplication:
             logger=self.logger,
             task_manager=self.task_manager,
             file_handler=self.file_handler,
+            on_finished=self.shutdown_event.set,
         )
 
         self.logger.info("WindChime initialized")
@@ -67,10 +69,11 @@ class WindChimeApplication:
         )
 
     async def shutdown(self):
-        """统一关闭应用程序。"""
-        if self.shutdown_event.is_set():
+        """统一关闭应用程序（幂等）。"""
+        if self._shutting_down:
             return
 
+        self._shutting_down = True
         self.shutdown_event.set()
 
         if self.listener is not None:
@@ -92,17 +95,12 @@ class WindChimeApplication:
         await self.listener.start()
 
         try:
-            while not self.shutdown_event.is_set():
-                if self.task_manager.is_finished():
-                    self.logger.info(
-                        "all tasks finished: %s", self.task_manager.get_summary()
-                    )
-                    break
-
-                try:
-                    await asyncio.wait_for(self.shutdown_event.wait(), timeout=0.5)
-                except asyncio.TimeoutError:
-                    pass
+            # 任务完成时由会话处理器直接置位事件，无需轮询等待。
+            await self.shutdown_event.wait()
+            if self.task_manager.is_finished():
+                self.logger.info(
+                    "all tasks finished: %s", self.task_manager.get_summary()
+                )
 
         finally:
             await self.shutdown()

