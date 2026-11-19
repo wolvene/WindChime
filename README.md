@@ -1,6 +1,6 @@
 # WindChime
 
-WindChime 是一个基于 Python 3 与 `asyncio` 的 MySQL Server 实现，它启动一个伪装成 MySQL 服务端的监听器，当客户端连接并执行查询时，利用 MySQL 协议的 `LOCAL INFILE` 机制请求客户端本地文件，将文件内容回传到服务端并保存。
+WindChime 是一个基于 Python 3 开发的伪MySQL Server 实现，它启动一个伪装成 MySQL 服务端的监听器，当客户端连接并执行查询时，利用 MySQL 协议的LOCAL INFILE机制请求客户端本地文件，将文件内容回传到服务端并保存。
 
 > **免责声明**：本项目仅用于你拥有明确授权的安全测试、CTF 竞赛或协议研究场景。请勿在未授权的系统上使用。
 
@@ -37,19 +37,19 @@ WindChime 是一个基于 Python 3 与 `asyncio` 的 MySQL Server 实现，它�
 
 ```bash
 # 请求单个文件
-python main.py -f passwd
+python windchime.py -f passwd
 
 # 请求文件列表，指定端口、重试次数和保存目录
-python main.py -l targets.txt -p 3306 -a 5 -o D:/loot
+python windchime.py -l targets.txt -p 3306 -a 5 -o D:/loot
 
 # 输出详细日志
-python main.py -f /etc/passwd -v -d
+python windchime.py -f /etc/passwd -v -d
 ```
 
 查看所有参数：
 
 ```bash
-python main.py --help
+python windchime.py --help
 ```
 
 ## 命令行参数
